@@ -31,73 +31,68 @@ async function fetchAlerts(retries = 3) {
 }
 
 async function generatePlacefile(xmlData) {
-    const parser = new xml2js.Parser();
+    const parser = new xml2js.Parser({
+        explicitArray: false,
+        mergeAttrs: true,
+        xmlns: true
+    });
     try {
         const result = await parser.parseStringPromise(xmlData);
-        console.log('Number of entries:', result.feed?.entry?.length || 0);
+        console.log('Number of entries:', Array.isArray(result.feed.entry) ? result.feed.entry.length : 1);
         
         let placefile = 'Title: NWS Weather Alerts\n';
         placefile += 'Refresh: 2\n';
-        placefile += 'Color: 255 0 0\n\n';
+        placefile += 'Color: 255 0 0\n';
+        placefile += 'Font: 1, 11, 1, "Arial"\n\n';
 
-        if (result.feed && result.feed.entry) {
-            for (const entry of result.feed.entry) {
-                try {
-                    const title = entry.title[0].replace(/;/g, ',');
-                    const polygon = entry['cap:polygon']?.[0] || entry['georss:polygon']?.[0];
-                    const point = entry['georss:point']?.[0] || entry['cap:point']?.[0];
-
-                    console.log(`Processing alert: ${title}`);
-                    console.log('Polygon data:', polygon);
-                    console.log('Point data:', point);
-
-                    if (polygon) {
-                        const points = polygon.trim().split(/\s+/);
-                        const coordinates = [];
-                        
-                        for (let i = 0; i < points.length; i += 2) {
-                            if (points[i] && points[i + 1]) {
-                                coordinates.push([
-                                    parseFloat(points[i]).toFixed(4),
-                                    parseFloat(points[i + 1]).toFixed(4)
-                                ]);
-                            }
+        const entries = Array.isArray(result.feed.entry) ? result.feed.entry : [result.feed.entry];
+        
+        for (const entry of entries) {
+            try {
+                const title = entry.title.replace(/;/g, ',');
+                let polygon = entry['cap:polygon'] || entry['georss:polygon'];
+                
+                if (polygon) {
+                    polygon = Array.isArray(polygon) ? polygon[0] : polygon;
+                    const points = polygon.trim().split(/\s+/);
+                    const coordinates = [];
+                    
+                    for (let i = 0; i < points.length; i += 2) {
+                        if (points[i] && points[i + 1]) {
+                            coordinates.push([points[i], points[i + 1]]);
                         }
+                    }
 
-                        if (coordinates.length > 2) {
-                            // Close the polygon by adding the first point again
+                    if (coordinates.length > 2) {
+                        // Close the polygon by adding the first point again if needed
+                        if (coordinates[0][0] !== coordinates[coordinates.length - 1][0] ||
+                            coordinates[0][1] !== coordinates[coordinates.length - 1][1]) {
                             coordinates.push(coordinates[0]);
-                            
-                            // Add the warning polygon
-                            placefile += `Line: ${coordinates.map(([lat, lon]) => `${lat}, ${lon}`).join(', ')}\n`;
-                            placefile += 'Line: 2, 0, 255, 0, 0\n';
-                            placefile += 'Fill: 255, 0, 0, 64\n';  // More transparent fill
-                            placefile += 'Threshold: 999\n\n';
-
-                            // Add centered label
-                            const centerLat = coordinates.reduce((sum, [lat]) => sum + parseFloat(lat), 0) / coordinates.length;
-                            const centerLon = coordinates.reduce((sum, [,lon]) => sum + parseFloat(lon), 0) / coordinates.length;
-                            
-                            placefile += `Object: ${centerLat}/${centerLon}\n`;
-                            placefile += 'Threshold: 999\n';
-                            placefile += 'Icon: 1\n';
-                            placefile += `Text: ${title}\n\n`;
                         }
-                    } else if (point) {
-                        const [lat, lon] = point.split(' ').map(coord => parseFloat(coord).toFixed(4));
-                        placefile += `Object: ${lat}/${lon}\n`;
+                        
+                        // Add the warning polygon with a more visible style
+                        placefile += `Line: ${coordinates.map(([lat, lon]) => `${lat}, ${lon}`).join(', ')}\n`;
+                        placefile += 'Line: 3, 0, 255, 0, 0\n';  // Thicker red outline
+                        placefile += 'Fill: 255, 0, 0, 32\n';    // Very transparent red fill
+                        placefile += 'Threshold: 999\n\n';
+
+                        // Add centered label with background
+                        const centerLat = coordinates.reduce((sum, [lat]) => sum + parseFloat(lat), 0) / coordinates.length;
+                        const centerLon = coordinates.reduce((sum, [,lon]) => sum + parseFloat(lon), 0) / coordinates.length;
+                        
+                        placefile += `Object: ${centerLat}/${centerLon}\n`;
                         placefile += 'Threshold: 999\n';
                         placefile += 'Icon: 1\n';
+                        placefile += `TextBackground: 200, 0, 0, 128\n`; // Semi-transparent red background
                         placefile += `Text: ${title}\n\n`;
                     }
-                } catch (entryError) {
-                    console.error('Error processing entry:', entryError);
-                    continue;
                 }
+            } catch (entryError) {
+                console.error('Error processing entry:', entryError);
+                continue;
             }
         }
 
-        console.log('Generated placefile length:', placefile.length);
         return placefile;
     } catch (error) {
         console.error('Error parsing XML:', error);
@@ -124,6 +119,11 @@ app.get('/alerts.txt', async (req, res) => {
         res.status(500).send('Error generating placefile');
     }
 });
+
+app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+});
+;
 
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
