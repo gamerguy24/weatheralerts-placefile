@@ -32,64 +32,72 @@ async function fetchAlerts(retries = 3) {
 
 async function generatePlacefile(xmlData) {
     const parser = new xml2js.Parser({
-        explicitArray: false,
-        mergeAttrs: true,
-        xmlns: true
+        explicitArray: true,
+        mergeAttrs: false,
+        xmlns: true,
+        trim: true
     });
     try {
         const result = await parser.parseStringPromise(xmlData);
-        console.log('Number of entries:', Array.isArray(result.feed.entry) ? result.feed.entry.length : 1);
+        console.log('Number of entries:', result.feed?.entry?.length || 0);
         
         let placefile = 'Title: NWS Weather Alerts\n';
         placefile += 'Refresh: 2\n';
         placefile += 'Color: 255 0 0\n';
         placefile += 'Font: 1, 11, 1, "Arial"\n\n';
 
-        const entries = Array.isArray(result.feed.entry) ? result.feed.entry : [result.feed.entry];
-        
-        for (const entry of entries) {
-            try {
-                const title = entry.title.replace(/;/g, ',');
-                let polygon = entry['cap:polygon'] || entry['georss:polygon'];
-                
-                if (polygon) {
-                    polygon = Array.isArray(polygon) ? polygon[0] : polygon;
-                    const points = polygon.trim().split(/\s+/);
-                    const coordinates = [];
+        if (result.feed && result.feed.entry) {
+            for (const entry of result.feed.entry) {
+                try {
+                    // Debug log the entry structure
+                    console.log('Processing entry:', JSON.stringify(entry['title'], null, 2));
                     
-                    for (let i = 0; i < points.length; i += 2) {
-                        if (points[i] && points[i + 1]) {
-                            coordinates.push([points[i], points[i + 1]]);
+                    // Safely get the title
+                    const title = entry.title?.[0]?._?.toString() || 
+                                entry.title?.[0]?.toString() || 
+                                'Unknown Alert';
+                    const safeTitle = title.replace(/[;]/g, ',');
+                    
+                    let polygon = entry['cap:polygon']?.[0] || entry['georss:polygon']?.[0];
+                    
+                    if (polygon) {
+                        const points = polygon.trim().split(/\s+/);
+                        const coordinates = [];
+                        
+                        for (let i = 0; i < points.length; i += 2) {
+                            if (points[i] && points[i + 1]) {
+                                coordinates.push([points[i], points[i + 1]]);
+                            }
+                        }
+
+                        if (coordinates.length > 2) {
+                            // Close the polygon
+                            if (coordinates[0][0] !== coordinates[coordinates.length - 1][0] ||
+                                coordinates[0][1] !== coordinates[coordinates.length - 1][1]) {
+                                coordinates.push(coordinates[0]);
+                            }
+                            
+                            // Add polygon
+                            placefile += `Line: ${coordinates.map(([lat, lon]) => `${lat}, ${lon}`).join(', ')}\n`;
+                            placefile += 'Line: 3, 0, 255, 0, 0\n';
+                            placefile += 'Fill: 255, 0, 0, 32\n';
+                            placefile += 'Threshold: 999\n\n';
+
+                            // Add label
+                            const centerLat = coordinates.reduce((sum, [lat]) => sum + parseFloat(lat), 0) / coordinates.length;
+                            const centerLon = coordinates.reduce((sum, [,lon]) => sum + parseFloat(lon), 0) / coordinates.length;
+                            
+                            placefile += `Object: ${centerLat}/${centerLon}\n`;
+                            placefile += 'Threshold: 999\n';
+                            placefile += 'Icon: 1\n';
+                            placefile += `TextBackground: 200, 0, 0, 128\n`;
+                            placefile += `Text: ${safeTitle}\n\n`;
                         }
                     }
-
-                    if (coordinates.length > 2) {
-                        // Close the polygon by adding the first point again if needed
-                        if (coordinates[0][0] !== coordinates[coordinates.length - 1][0] ||
-                            coordinates[0][1] !== coordinates[coordinates.length - 1][1]) {
-                            coordinates.push(coordinates[0]);
-                        }
-                        
-                        // Add the warning polygon with a more visible style
-                        placefile += `Line: ${coordinates.map(([lat, lon]) => `${lat}, ${lon}`).join(', ')}\n`;
-                        placefile += 'Line: 3, 0, 255, 0, 0\n';  // Thicker red outline
-                        placefile += 'Fill: 255, 0, 0, 32\n';    // Very transparent red fill
-                        placefile += 'Threshold: 999\n\n';
-
-                        // Add centered label with background
-                        const centerLat = coordinates.reduce((sum, [lat]) => sum + parseFloat(lat), 0) / coordinates.length;
-                        const centerLon = coordinates.reduce((sum, [,lon]) => sum + parseFloat(lon), 0) / coordinates.length;
-                        
-                        placefile += `Object: ${centerLat}/${centerLon}\n`;
-                        placefile += 'Threshold: 999\n';
-                        placefile += 'Icon: 1\n';
-                        placefile += `TextBackground: 200, 0, 0, 128\n`; // Semi-transparent red background
-                        placefile += `Text: ${title}\n\n`;
-                    }
+                } catch (entryError) {
+                    console.error('Error processing entry:', entryError);
+                    continue;
                 }
-            } catch (entryError) {
-                console.error('Error processing entry:', entryError);
-                continue;
             }
         }
 
