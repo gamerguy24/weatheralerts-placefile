@@ -35,7 +35,7 @@ async function generatePlacefile(xmlData) {
     const result = await parser.parseStringPromise(xmlData);
     
     let placefile = 'Title: NWS Weather Alerts\n';
-    placefile += 'Refresh: 5\n';
+    placefile += 'Refresh: 2\n';  // Changed from 5 to 2 minutes
     placefile += 'Color: 255 255 255\n\n';
 
     if (result.feed && result.feed.entry) {
