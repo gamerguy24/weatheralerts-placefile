@@ -108,6 +108,12 @@ async function generatePlacefile(xmlData) {
     }
 }
 
+app.use(express.static('public')); // Add static file serving
+
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/public/index.html');
+});
+
 app.get('/alerts.txt', async (req, res) => {
     try {
         const xmlData = await fetchAlerts();
