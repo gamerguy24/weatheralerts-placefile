@@ -38,46 +38,61 @@ async function generatePlacefile(xmlData) {
         
         let placefile = 'Title: NWS Weather Alerts\n';
         placefile += 'Refresh: 2\n';
-        placefile += 'Color: 255 0 0\n';
+        placefile += 'Color: 255 0 0\n\n';
 
         if (result.feed && result.feed.entry) {
             for (const entry of result.feed.entry) {
-                const polygon = entry['cap:polygon']?.[0];
-                const point = entry['georss:point']?.[0] || entry['cap:point']?.[0];
-                const title = entry.title[0].replace(/;/g, ',');
+                try {
+                    const title = entry.title[0].replace(/;/g, ',');
+                    const polygon = entry['cap:polygon']?.[0] || entry['georss:polygon']?.[0];
+                    const point = entry['georss:point']?.[0] || entry['cap:point']?.[0];
 
-                if (polygon) {
-                    // Handle polygon data
-                    const points = polygon.split(' ');
-                    const coordinates = [];
-                    
-                    // Convert points to coordinate pairs
-                    for (let i = 0; i < points.length; i += 2) {
-                        if (points[i] && points[i + 1]) {
-                            coordinates.push([points[i], points[i + 1]]);
+                    console.log(`Processing alert: ${title}`);
+                    console.log('Polygon data:', polygon);
+                    console.log('Point data:', point);
+
+                    if (polygon) {
+                        const points = polygon.trim().split(/\s+/);
+                        const coordinates = [];
+                        
+                        for (let i = 0; i < points.length; i += 2) {
+                            if (points[i] && points[i + 1]) {
+                                coordinates.push([
+                                    parseFloat(points[i]).toFixed(4),
+                                    parseFloat(points[i + 1]).toFixed(4)
+                                ]);
+                            }
                         }
-                    }
 
-                    if (coordinates.length > 2) {
-                        // Add the warning polygon
-                        placefile += `Line: ${coordinates.map(([lat, lon]) => `${lat}, ${lon}`).join(', ')}\n`;
-                        placefile += 'Line: 2, 0, 255, 0, 0\n';  // Red outline
-                        placefile += 'Fill: 255, 0, 0, 128\n';   // Semi-transparent red fill
-                        placefile += 'Threshold: 999\n\n';
+                        if (coordinates.length > 2) {
+                            // Close the polygon by adding the first point again
+                            coordinates.push(coordinates[0]);
+                            
+                            // Add the warning polygon
+                            placefile += `Line: ${coordinates.map(([lat, lon]) => `${lat}, ${lon}`).join(', ')}\n`;
+                            placefile += 'Line: 2, 0, 255, 0, 0\n';
+                            placefile += 'Fill: 255, 0, 0, 64\n';  // More transparent fill
+                            placefile += 'Threshold: 999\n\n';
 
-                        // Add a label at the first point
-                        placefile += `Object: ${coordinates[0][0]}/${coordinates[0][1]}\n`;
+                            // Add centered label
+                            const centerLat = coordinates.reduce((sum, [lat]) => sum + parseFloat(lat), 0) / coordinates.length;
+                            const centerLon = coordinates.reduce((sum, [,lon]) => sum + parseFloat(lon), 0) / coordinates.length;
+                            
+                            placefile += `Object: ${centerLat}/${centerLon}\n`;
+                            placefile += 'Threshold: 999\n';
+                            placefile += 'Icon: 1\n';
+                            placefile += `Text: ${title}\n\n`;
+                        }
+                    } else if (point) {
+                        const [lat, lon] = point.split(' ').map(coord => parseFloat(coord).toFixed(4));
+                        placefile += `Object: ${lat}/${lon}\n`;
                         placefile += 'Threshold: 999\n';
                         placefile += 'Icon: 1\n';
                         placefile += `Text: ${title}\n\n`;
                     }
-                } else if (point) {
-                    // Fallback to point if no polygon exists
-                    const [lat, lon] = point.split(' ');
-                    placefile += `Object: ${lat}/${lon}\n`;
-                    placefile += 'Threshold: 999\n';
-                    placefile += 'Icon: 1\n';
-                    placefile += `Text: ${title}\n\n`;
+                } catch (entryError) {
+                    console.error('Error processing entry:', entryError);
+                    continue;
                 }
             }
         }
